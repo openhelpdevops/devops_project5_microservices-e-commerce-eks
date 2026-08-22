@@ -41,7 +41,7 @@ spec:
                 - ALL
             privileged: false
             readOnlyRootFilesystem: true
-          image: 720973523623.dkr.ecr.us-east-1.amazonaws.com/openhelp/prod/checkoutservice:3
+          image: 720973523623.dkr.ecr.us-east-1.amazonaws.com/openhelp/prod/checkoutservice:4
           ports:
           - containerPort: 5050
           readinessProbe:
