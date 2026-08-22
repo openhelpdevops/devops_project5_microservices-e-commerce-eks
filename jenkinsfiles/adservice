@@ -1,0 +1,223 @@
+pipeline {
+
+    agent any
+
+    environment {
+
+        // AWS ECR
+        AWS_REGION   = 'us-east-1'
+        AWS_ACCOUNT  = '720973523623'
+
+        // ECR Repository
+        ECR_PREFIX   = 'openhelp/prod'
+        IMAGE        = 'adservice'
+        TAG          = "${BUILD_NUMBER}"
+
+        ECR_REGISTRY = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        REPO_URL     = "${ECR_REGISTRY}/${ECR_PREFIX}/${IMAGE}"
+        IMAGE_PATH   = "${REPO_URL}:${TAG}"
+
+        // GitHub Credentials
+        GITHUB_CREDS = credentials('my-git-pattoken')
+
+        // GitHub Repository
+        GIT_REPO_NAME = 'devops_project5_microservices-e-commerce-eks-project'
+        GIT_USER_NAME = 'openhelpdevops'
+        GIT_EMAIL     = 'sreejithedl@gmail.com'
+
+        // Kubernetes YAML
+        YAML_FILE = 'adservice.yaml'
+
+        // GitOps Branch
+        GITOPS_BRANCH = "gitops-adservice-${BUILD_NUMBER}"
+
+        // Email
+        EMAIL_TO = 'sreejithedl@gmail.com'
+    }
+
+    stages {
+
+        stage('Cleaning Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Clone Repo') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/openhelpdevops/devops_project5_microservices-e-commerce-eks-project.git'
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+
+                dir('src/adservice') {
+
+                    sh '''
+                        set -e
+
+                        echo "Cleaning unused Docker resources"
+                        docker system prune -f
+
+                        echo "Docker image will be:"
+                        echo "$IMAGE_PATH"
+
+                        echo "Building Docker image"
+                        docker build -t "$IMAGE_PATH" .
+
+                        echo "Logging into AWS ECR"
+                        aws ecr get-login-password \
+                          --region "$AWS_REGION" \
+                        | docker login \
+                          --username AWS \
+                          --password-stdin "$ECR_REGISTRY"
+
+                        echo "Pushing Docker image"
+                        docker push "$IMAGE_PATH"
+
+                        echo "Docker image pushed successfully:"
+                        echo "$IMAGE_PATH"
+                    '''
+                }
+            }
+        }
+
+        stage('Update Kubernetes YAML & Create PR') {
+            steps {
+
+                dir('kubernetes-files') {
+
+                    sh '''
+                        set -e
+
+                        echo "Configuring Git identity"
+                        git config user.email "${GIT_EMAIL}"
+                        git config user.name "${GIT_USER_NAME}"
+
+                        echo "Creating GitOps branch"
+                        git checkout -b "${GITOPS_BRANCH}"
+
+                        echo "Updating Kubernetes YAML"
+
+                        sed -i \
+                          "s#image:.*#image: ${IMAGE_PATH}#g" \
+                          "${YAML_FILE}"
+
+                        echo "Updated YAML:"
+                        cat "${YAML_FILE}"
+
+                        echo "Adding changes"
+                        git add "${YAML_FILE}"
+
+                        if git diff --cached --quiet; then
+                            echo "No changes found"
+                        else
+                            git commit \
+                              -m "Update adservice image to ${TAG}"
+                        fi
+
+                        echo "Pushing GitOps branch"
+
+                        git push \
+                          "https://${GITHUB_CREDS_USR}:${GITHUB_CREDS_PSW}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git" \
+                          "HEAD:${GITOPS_BRANCH}"
+
+                        echo "Creating GitHub Pull Request"
+
+                        export GH_TOKEN="${GITHUB_CREDS_PSW}"
+
+                        gh pr create \
+                          --repo "${GIT_USER_NAME}/${GIT_REPO_NAME}" \
+                          --base main \
+                          --head "${GITOPS_BRANCH}" \
+                          --title "Deploy adservice image ${TAG}" \
+                          --body "Jenkins build ${BUILD_NUMBER} updated ${YAML_FILE} to ${IMAGE_PATH}. Please review and approve before merging." \
+                          | tee pr-url.txt
+
+                        echo "Pull Request URL:"
+                        cat pr-url.txt
+                    '''
+                }
+            }
+        }
+
+        stage('Send Pull Request Email') {
+            steps {
+
+                sh '''
+                    echo "Preparing Pull Request Email"
+
+                    PR_URL=$(cat kubernetes-files/pr-url.txt)
+
+                    echo "Pull Request URL:"
+                    echo "$PR_URL"
+
+                    cat > pr-email.txt <<EOF
+Hi Team,
+
+A new GitHub Pull Request has been created for adservice deployment.
+
+Build Number:
+${BUILD_NUMBER}
+
+Docker Image:
+${IMAGE_PATH}
+
+GitOps Branch:
+${GITOPS_BRANCH}
+
+Please review and approve the Pull Request:
+
+${PR_URL}
+
+Jenkins Build:
+${BUILD_URL}
+
+Regards,
+Jenkins
+EOF
+                '''
+
+                emailext(
+                    subject: "GitHub Pull Request - adservice Build #${BUILD_NUMBER}",
+                    body: '${FILE,path="pr-email.txt"}',
+                    to: "${EMAIL_TO}"
+                )
+            }
+        }
+    }
+
+    post {
+
+        success {
+
+            echo "PIPELINE SUCCESS"
+
+            echo "Docker Image:"
+            echo "${IMAGE_PATH}"
+
+            echo "GitOps Branch:"
+            echo "${GITOPS_BRANCH}"
+
+            echo "Pull Request created."
+
+            echo "Pull Request email sent."
+        }
+
+        failure {
+
+            echo "PIPELINE FAILED"
+
+            echo "Check Jenkins console output."
+        }
+
+        always {
+
+            sh '''
+                docker logout "$ECR_REGISTRY" >/dev/null 2>&1 || true
+            '''
+        }
+    }
+}

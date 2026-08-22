@@ -1,0 +1,621 @@
+pipeline {
+
+    agent any
+
+    tools {
+        maven "Maven3.9.15"
+    }
+
+    environment {
+
+        // ============================================================
+        // AWS ECR
+        // ============================================================
+
+        AWS_REGION  = 'us-east-1'
+        AWS_ACCOUNT = '720973523623'
+
+        IMAGE = 'checkoutservice'
+        TAG   = "${BUILD_NUMBER}"
+
+        ECR_REGISTRY   = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        ECR_REPOSITORY = "openhelp/prod/${IMAGE}"
+
+        REPO_URL   = "${ECR_REGISTRY}/${ECR_REPOSITORY}"
+        IMAGE_PATH = "${REPO_URL}:${TAG}"
+
+
+        // ============================================================
+        // GitHub Credentials
+        // ============================================================
+
+        GITHUB_CREDS = credentials('my-git-pattoken')
+
+
+        // ============================================================
+        // GitHub Repository
+        // ============================================================
+
+        GIT_REPO_NAME = 'devops_project5_microservices-e-commerce-eks-project'
+        GIT_USER_NAME = 'openhelpdevops'
+        GIT_EMAIL     = 'sreejithedl@gmail.com'
+
+
+        // ============================================================
+        // Kubernetes YAML
+        // ============================================================
+
+        YAML_FILE = 'checkoutservice.yaml'
+
+
+        // ============================================================
+        // GitOps Branch
+        // ============================================================
+
+        GITOPS_BRANCH = "gitops-checkoutservice-${BUILD_NUMBER}"
+    }
+
+
+    stages {
+
+        // ============================================================
+        // CLEAN WORKSPACE
+        // ============================================================
+
+        stage('Cleaning Workspace') {
+
+            steps {
+
+                cleanWs()
+
+            }
+
+        }
+
+
+        // ============================================================
+        // CLONE GITHUB REPOSITORY
+        // ============================================================
+
+        stage('Clone Repo') {
+
+            steps {
+
+                git branch: 'main',
+                    credentialsId: 'my-git-pattoken',
+                    url: 'https://github.com/openhelpdevops/devops_project5_microservices-e-commerce-eks-project.git'
+
+            }
+
+        }
+
+
+        // ============================================================
+        // VERIFY AWS AND ECR
+        // ============================================================
+
+        stage('Verify AWS & ECR') {
+
+            steps {
+
+                sh '''
+
+                    set -e
+
+                    echo "================================================"
+                    echo "AWS IDENTITY"
+                    echo "================================================"
+
+                    aws sts get-caller-identity
+
+
+                    echo ""
+                    echo "================================================"
+                    echo "VERIFYING ECR REPOSITORY"
+                    echo "================================================"
+
+                    echo "Repository:"
+                    echo "$ECR_REPOSITORY"
+
+
+                    aws ecr describe-repositories \
+                        --repository-names "$ECR_REPOSITORY" \
+                        --region "$AWS_REGION" \
+                        --query 'repositories[0].repositoryUri' \
+                        --output text
+
+
+                    echo ""
+                    echo "ECR repository found successfully"
+
+                '''
+
+            }
+
+        }
+
+
+        // ============================================================
+        // DOCKER BUILD
+        // ============================================================
+
+        stage('Docker Build') {
+
+            steps {
+
+                dir('src/checkoutservice') {
+
+                    sh '''
+
+                        set -e
+
+                        echo "================================================"
+                        echo "CLEANING DOCKER RESOURCES"
+                        echo "================================================"
+
+                        docker system prune -f || true
+                        docker container prune -f || true
+
+
+                        echo ""
+                        echo "================================================"
+                        echo "BUILDING CHECKOUTSERVICE IMAGE"
+                        echo "================================================"
+
+                        echo "Image:"
+                        echo "$IMAGE_PATH"
+
+
+                        docker build \
+                            -t "$IMAGE_PATH" \
+                            .
+
+
+                        echo ""
+                        echo "================================================"
+                        echo "DOCKER IMAGE CREATED"
+                        echo "================================================"
+
+
+                        docker image inspect "$IMAGE_PATH" \
+                            --format='{{.RepoTags}}'
+
+                    '''
+
+                }
+
+            }
+
+        }
+
+
+        // ============================================================
+        // LOGIN TO AWS ECR
+        // ============================================================
+
+        stage('Login to AWS ECR') {
+
+            steps {
+
+                sh '''
+
+                    set -e
+
+                    echo "================================================"
+                    echo "AWS ECR LOGIN"
+                    echo "================================================"
+
+
+                    echo "Removing old ECR login"
+
+                    docker logout "$ECR_REGISTRY" \
+                        >/dev/null 2>&1 || true
+
+
+                    echo ""
+                    echo "Getting fresh ECR token"
+
+
+                    aws ecr get-login-password \
+                        --region "$AWS_REGION" \
+                    | docker login \
+                        --username AWS \
+                        --password-stdin "$ECR_REGISTRY"
+
+
+                    echo ""
+                    echo "================================================"
+                    echo "ECR LOGIN SUCCESSFUL"
+                    echo "================================================"
+
+                '''
+
+            }
+
+        }
+
+
+        // ============================================================
+        // PUSH IMAGE TO AWS ECR
+        // ============================================================
+
+        stage('Push Image to ECR') {
+
+            steps {
+
+                sh '''
+
+                    set -e
+
+                    echo "================================================"
+                    echo "PUSHING CHECKOUTSERVICE IMAGE"
+                    echo "================================================"
+
+                    echo ""
+                    echo "Repository:"
+                    echo "$ECR_REPOSITORY"
+
+                    echo ""
+                    echo "Complete Image:"
+                    echo "$IMAGE_PATH"
+
+
+                    docker push "$IMAGE_PATH"
+
+
+                    echo ""
+                    echo "================================================"
+                    echo "IMAGE PUSHED SUCCESSFULLY"
+                    echo "================================================"
+
+                    echo "$IMAGE_PATH"
+
+                '''
+
+            }
+
+        }
+
+
+        // ============================================================
+        // VERIFY IMAGE EXISTS IN ECR
+        // ============================================================
+
+        stage('Verify Image in ECR') {
+
+            steps {
+
+                sh '''
+
+                    set -e
+
+                    echo "================================================"
+                    echo "VERIFYING IMAGE IN AWS ECR"
+                    echo "================================================"
+
+
+                    aws ecr describe-images \
+                        --repository-name "$ECR_REPOSITORY" \
+                        --image-ids imageTag="$TAG" \
+                        --region "$AWS_REGION"
+
+
+                    echo ""
+                    echo "Checkoutservice image exists in ECR:"
+                    echo "$IMAGE_PATH"
+
+                '''
+
+            }
+
+        }
+
+
+        // ============================================================
+        // UPDATE KUBERNETES DEPLOYMENT
+        // ============================================================
+
+        stage('Update Kubernetes Deployment File') {
+
+            steps {
+
+                dir('kubernetes-files') {
+
+                    sh '''
+
+                        set -e
+
+                        echo "================================================"
+                        echo "CONFIGURING GIT"
+                        echo "================================================"
+
+
+                        git config user.email "${GIT_EMAIL}"
+                        git config user.name "${GIT_USER_NAME}"
+
+
+                        echo ""
+                        echo "================================================"
+                        echo "CREATING GITOPS BRANCH"
+                        echo "================================================"
+
+                        echo "${GITOPS_BRANCH}"
+
+
+                        git checkout -b "${GITOPS_BRANCH}"
+
+
+                        echo ""
+                        echo "================================================"
+                        echo "CURRENT IMAGE"
+                        echo "================================================"
+
+
+                        grep "image:" "${YAML_FILE}" || true
+
+
+                        echo ""
+                        echo "================================================"
+                        echo "UPDATING CHECKOUTSERVICE IMAGE"
+                        echo "================================================"
+
+                        echo "${IMAGE_PATH}"
+
+
+                        sed -i \
+                            "s#image:.*#image: ${IMAGE_PATH}#g" \
+                            "${YAML_FILE}"
+
+
+                        echo ""
+                        echo "================================================"
+                        echo "UPDATED KUBERNETES YAML"
+                        echo "================================================"
+
+
+                        cat "${YAML_FILE}"
+
+
+                        git add "${YAML_FILE}"
+
+
+                        if git diff --cached --quiet
+                        then
+
+                            echo "No Kubernetes YAML changes detected"
+
+                        else
+
+                            git commit \
+                                -m "Update checkoutservice image to ${TAG}"
+
+                        fi
+
+                    '''
+
+                }
+
+            }
+
+        }
+
+
+        // ============================================================
+        // PUSH GITOPS BRANCH TO GITHUB
+        // ============================================================
+
+        stage('Push GitOps Branch') {
+
+            steps {
+
+                dir('kubernetes-files') {
+
+                    sh '''
+
+                        set -e
+
+                        echo "================================================"
+                        echo "PUSHING GITOPS BRANCH"
+                        echo "================================================"
+
+
+                        git push \
+                            "https://${GITHUB_CREDS_USR}:${GITHUB_CREDS_PSW}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git" \
+                            "HEAD:${GITOPS_BRANCH}"
+
+
+                        echo ""
+                        echo "GitOps branch pushed successfully:"
+                        echo "${GITOPS_BRANCH}"
+
+                    '''
+
+                }
+
+            }
+
+        }
+
+
+        // ============================================================
+        // CREATE GITHUB PULL REQUEST
+        // ============================================================
+
+        stage('Create GitHub Pull Request') {
+
+            steps {
+
+                dir('kubernetes-files') {
+
+                    sh '''
+
+                        set -e
+
+                        echo "================================================"
+                        echo "CREATING GITHUB PULL REQUEST"
+                        echo "================================================"
+
+
+                        export GH_TOKEN="${GITHUB_CREDS_PSW}"
+
+
+                        gh pr create \
+                            --repo "${GIT_USER_NAME}/${GIT_REPO_NAME}" \
+                            --base main \
+                            --head "${GITOPS_BRANCH}" \
+                            --title "Deploy checkoutservice image ${TAG}" \
+                            --body "Jenkins Build: ${BUILD_NUMBER}
+
+Service:
+checkoutservice
+
+Docker Image:
+${IMAGE_PATH}
+
+Kubernetes Manifest:
+${YAML_FILE}
+
+Please review and approve this GitOps deployment."
+
+
+                        echo ""
+                        echo "================================================"
+                        echo "PULL REQUEST URL"
+                        echo "================================================"
+
+
+                        gh pr view \
+                            "${GITOPS_BRANCH}" \
+                            --repo "${GIT_USER_NAME}/${GIT_REPO_NAME}" \
+                            --json url \
+                            --jq '.url'
+
+                    '''
+
+                }
+
+            }
+
+        }
+
+
+        // ============================================================
+        // DEPLOYMENT INFORMATION
+        // ============================================================
+
+        stage('Deployment Information') {
+
+            steps {
+
+                sh '''
+
+                    echo ""
+                    echo "================================================"
+                    echo "CHECKOUTSERVICE BUILD COMPLETE"
+                    echo "================================================"
+
+                    echo ""
+                    echo "Build Number:"
+                    echo "$BUILD_NUMBER"
+
+                    echo ""
+                    echo "AWS Region:"
+                    echo "$AWS_REGION"
+
+                    echo ""
+                    echo "ECR Repository:"
+                    echo "$ECR_REPOSITORY"
+
+                    echo ""
+                    echo "Docker Image:"
+                    echo "$IMAGE_PATH"
+
+                    echo ""
+                    echo "GitOps Branch:"
+                    echo "$GITOPS_BRANCH"
+
+                    echo ""
+                    echo "Kubernetes YAML:"
+                    echo "$YAML_FILE"
+
+                    echo ""
+                    echo "================================================"
+                    echo "NEXT STEP"
+                    echo "================================================"
+
+                    echo "Review and merge the GitHub Pull Request."
+
+                    echo ""
+                    echo "GitHub main"
+                    echo "     |"
+                    echo "     v"
+                    echo "Argo CD"
+                    echo "     |"
+                    echo "     v"
+                    echo "AWS EKS"
+                    echo "     |"
+                    echo "     v"
+                    echo "checkoutservice"
+
+                '''
+
+            }
+
+        }
+
+    }
+
+
+    // ============================================================
+    // POST ACTIONS
+    // ============================================================
+
+    post {
+
+        success {
+
+            echo "================================================"
+            echo "PIPELINE SUCCESS"
+            echo "================================================"
+
+            echo "Checkoutservice image pushed to AWS ECR:"
+            echo "${IMAGE_PATH}"
+
+            echo "GitOps branch:"
+            echo "${GITOPS_BRANCH}"
+
+            echo "GitHub Pull Request created."
+
+            echo "Review and merge the PR into main."
+
+        }
+
+
+        failure {
+
+            echo "================================================"
+            echo "PIPELINE FAILED"
+            echo "================================================"
+
+            echo "Check Jenkins Console Output."
+            echo "Identify the failed stage."
+
+        }
+
+
+        always {
+
+            sh '''
+
+                echo "Logging out from AWS ECR"
+
+                docker logout "$ECR_REGISTRY" \
+                    >/dev/null 2>&1 || true
+
+            '''
+
+        }
+
+    }
+
+}
