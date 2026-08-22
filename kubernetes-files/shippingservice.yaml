@@ -41,7 +41,7 @@ spec:
               - ALL
           privileged: false
           readOnlyRootFilesystem: true
-        image: 720973523623.dkr.ecr.us-east-1.amazonaws.com/openhelp/prod/shippingservice:1
+        image: 720973523623.dkr.ecr.us-east-1.amazonaws.com/openhelp/prod/shippingservice:2
         ports:
         - containerPort: 50051
         env:
