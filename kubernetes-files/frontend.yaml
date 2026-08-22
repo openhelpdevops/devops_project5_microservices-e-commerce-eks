@@ -3,24 +3,41 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
+  labels:
+    app: frontend
 spec:
   replicas: 2
   revisionHistoryLimit: 10
+
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+
   selector:
     matchLabels:
       app: frontend
+
   template:
     metadata:
       labels:
         app: frontend
       annotations:
         sidecar.istio.io/rewriteAppHTTPProbers: "true"
+
     spec:
+      serviceAccountName: default
+      automountServiceAccountToken: false
+
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -28,120 +45,175 @@ spec:
           labelSelector:
             matchLabels:
               app: frontend
-      serviceAccountName: default
-      securityContext:
-        fsGroup: 1000
-        runAsGroup: 1000
-        runAsNonRoot: true
-        runAsUser: 1000
+
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: frontend
+
       containers:
         - name: server
+          image: 242201296943.dkr.ecr.us-east-1.amazonaws.com/frontend:1
+          imagePullPolicy: IfNotPresent
+
           securityContext:
             allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
-            privileged: false
-            readOnlyRootFilesystem: true
-          image: 720973523623.dkr.ecr.us-east-1.amazonaws.com/openhelp/prod/frontend:1
+
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          startupProbe:
+            httpGet:
+              path: /_healthz
+              port: http
+              httpHeaders:
+                - name: Cookie
+                  value: shop_session-id=x-startup-probe
+            failureThreshold: 30
+            periodSeconds: 5
+            timeoutSeconds: 2
+
           readinessProbe:
-            initialDelaySeconds: 10
             httpGet:
-              path: "/_healthz"
-              port: 8080
+              path: /_healthz
+              port: http
               httpHeaders:
-                - name: "Cookie"
-                  value: "shop_session-id=x-readiness-probe"
+                - name: Cookie
+                  value: shop_session-id=x-readiness-probe
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
           livenessProbe:
-            initialDelaySeconds: 10
             httpGet:
-              path: "/_healthz"
-              port: 8080
+              path: /_healthz
+              port: http
               httpHeaders:
-                - name: "Cookie"
-                  value: "shop_session-id=x-liveness-probe"
+                - name: Cookie
+                  value: shop_session-id=x-liveness-probe
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
           env:
             - name: PORT
               value: "8080"
+
             - name: PRODUCT_CATALOG_SERVICE_ADDR
               value: "productcatalogservice:3550"
+
             - name: CURRENCY_SERVICE_ADDR
               value: "currencyservice:7000"
+
             - name: CART_SERVICE_ADDR
               value: "cartservice:7070"
+
             - name: RECOMMENDATION_SERVICE_ADDR
               value: "recommendationservice:8080"
+
             - name: SHIPPING_SERVICE_ADDR
               value: "shippingservice:50051"
+
             - name: CHECKOUT_SERVICE_ADDR
               value: "checkoutservice:5050"
+
             - name: AD_SERVICE_ADDR
               value: "adservice:9555"
+
             - name: ENV_PLATFORM
               value: "aws"
+
             - name: ENABLE_PROFILER
               value: "0"
+
           resources:
             requests:
               cpu: 100m
               memory: 64Mi
             limits:
-              cpu: 200m
-              memory: 128Mi
+              cpu: 500m
+              memory: 256Mi
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend
+  labels:
+    app: frontend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: frontend
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: frontend
+  labels:
+    app: frontend
 spec:
   type: ClusterIP
   selector:
     app: frontend
   ports:
     - name: http
-      port: 80
-      targetPort: 8080
       protocol: TCP
+      port: 80
+      targetPort: http
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: frontend-external
+  labels:
+    app: frontend
   annotations:
-    # Public NLB. Subnets are discovered dynamically from the Terraform-managed
-    # kubernetes.io/role/elb=1 subnet tags; no subnet IDs belong in app YAML.
-    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    # Create a public Network Load Balancer.
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
 
-    # Explicitly select AWS Load Balancer Controller if its Service mutating
-    # webhook is disabled or temporarily unavailable.
-    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+    # Explicitly use AWS Load Balancer Controller.
+    service.beta.kubernetes.io/aws-load-balancer-type: external
 
-    # Register VPC-native Pod IPs directly in the NLB target group.
-    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+    # Register Pod IP addresses directly in the target group.
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
 
-    # Health-check the same application endpoint used by Kubernetes probes.
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "http"
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "traffic-port"
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/_healthz"
+    # NLB health-check configuration.
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: HTTP
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: traffic-port
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: /_healthz
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-success-codes: "200"
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-healthy-threshold: "3"
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-unhealthy-threshold: "3"
     service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "10"
 
-    # Spread traffic across healthy targets in both AZs.
-    service.beta.kubernetes.io/aws-load-balancer-attributes: "load_balancing.cross_zone.enabled=true"
-    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "Project=openhelp,Environment=prod,ManagedBy=ArgoCD"
+    # Enable cross-zone load balancing.
+    service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
+
+    # Tags added to the AWS resources.
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: Project=openhelp,Environment=prod,ManagedBy=ArgoCD
+
 spec:
   type: LoadBalancer
   loadBalancerClass: service.k8s.aws/nlb
+
   selector:
     app: frontend
+
   ports:
     - name: http
-      port: 80
-      targetPort: 8080
       protocol: TCP
+      port: 80
+      targetPort: http
