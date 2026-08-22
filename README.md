@@ -244,6 +244,33 @@ The script always applies in dependency order: network, compute, platform.
 
 ## Safe destroy
 
+To use powershell, 
+
+Open PowerShell as Administrator:
+
+winget install -e --id Kubernetes.kubectl
+
+
+Run:
+
+$KubectlExe = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet" -Filter kubectl.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+$KubectlExe.FullName
+
+If it displays a path, configure it automatically:
+
+$KubectlFolder = $KubectlExe.DirectoryName
+$env:Path += ";$KubectlFolder"
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($UserPath -notlike "*$KubectlFolder*") {
+    [Environment]::SetEnvironmentVariable("Path", "$UserPath;$KubectlFolder", "User")
+}
+
+Now verify:
+
+kubectl version --client
+kubectl get nodes
+
+
 Do not destroy the VPC first. EKS, ENIs, load balancers, EC2 instances and security groups can still be using the subnets/VPC.
 
 Use:
