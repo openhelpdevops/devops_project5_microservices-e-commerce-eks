@@ -431,11 +431,10 @@ NAME            TYPE           CLUSTER-IP      EXTERNAL-IP                      
 argocd-server   LoadBalancer   172.20.131.20   a58fbb435a7964d3895948626f367d04-1884675910.us-east-1.elb.amazonaws.com   80:30367/TCP,443:32413/TCP   4h25m
 ```
 
-Access the ArgoCD UI using 
+Access the ArgoCD UI using the below link from browser
 
 
-https://<EXTERNAL-IP>.amazonaws.com
-
+a58fbb435a7964d3895948626f367d04-1884675910.us-east-1.elb.amazonaws.com 
 
 
 
@@ -448,8 +447,9 @@ kubectl get service argocd-server -n argocd -w
 Expected:
 
 ```text
-NAME            TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)
-argocd-server   LoadBalancer   10.x.x.x        192.168.0.242   80:xxxxx/TCP,443:xxxxx/TCP
+ubuntu@ip-10-20-1-168:~$ kubectl get service argocd-server -n argocd -w
+NAME            TYPE           CLUSTER-IP      EXTERNAL-IP                                                               PORT(S)                      AGE
+argocd-server   LoadBalancer   172.20.131.20   a58fbb435a7964d3895948626f367d04-1884675910.us-east-1.elb.amazonaws.com   80:30367/TCP,443:32413/TCP   4h33m
 ```
 
 Confirm:
