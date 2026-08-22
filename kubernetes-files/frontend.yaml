@@ -55,7 +55,7 @@ spec:
 
       containers:
         - name: server
-          image: 242201296943.dkr.ecr.us-east-1.amazonaws.com/frontend:1
+          image: 720973523623.dkr.ecr.us-east-1.amazonaws.com/openhelp/prod/frontend:2
           imagePullPolicy: IfNotPresent
 
           securityContext:
