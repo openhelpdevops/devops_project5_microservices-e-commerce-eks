@@ -295,7 +295,7 @@ To list the main workload resources:
 
 ```bash
 
-root@kube2:~# kubectl get all -n argocd
+root@kube:~# kubectl get all -n argocd
 NAME                                                    READY   STATUS    RESTARTS       AGE
 pod/argocd-application-controller-0                     1/1     Running   0              3m27s
 pod/argocd-applicationset-controller-7f7b6c9856-xmgts   1/1     Running   0              3m32s
@@ -373,7 +373,7 @@ done
 # PART IV — Expose Argo CD through 
 
 ```text
-root@kube2:~#  kubectl get svc -n argocd
+root@kube:~#  kubectl get svc -n argocd
 NAME                                      TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
 argocd-applicationset-controller          ClusterIP   10.101.41.212    <none>        7000/TCP,8080/TCP            4m26s
 argocd-dex-server                         ClusterIP   10.102.21.19     <none>        5556/TCP,5557/TCP,5558/TCP   4m26s
@@ -388,29 +388,50 @@ Because Kubernetes deploys services to arbitrary network addresses inside your c
 Argo CD sets up a service named argocd-server on port 443 internally. Because port 443 is the default HTTPS port, and you may be running some other HTTP/HTTPS services,
 it’s common practice to forward those to arbitrarily chosen other ports, like 8080, like so:
 
+Create dev name space
+root@kube:~#  kubectl create ns dev
 
 
 ## 18. Change `argocd-server` to `LoadBalancer`
 
 The default service is `ClusterIP`.
 
-Patch it:
+Edit the ArgoCD Server Service
+```bash
+kubectl edit svc argocd-server -n argocd
+```
+Change the Service Type
+
+Find this line:
+
+type: ClusterIP
+
+Change it to:
+
+type: LoadBalancer
+
+Save and exit (:wq for vi).
+
+Get the External Load Balancer DNS
 
 ```bash
-kubectl patch service argocd-server \
-  -n argocd \
-  --type merge \
-  -p '{"spec":{"type":"LoadBalancer"}}'
-```
-
-Request the desired MetalLB address:
-
+kubectl get svc argocd-server -n argocd
 ```bash
-kubectl annotate service argocd-server \
-  -n argocd \
-  metallb.io/loadBalancerIPs=192.168.0.242 \
-  --overwrite
-```
+
+Sample output:
+```bash
+ubuntu@ip-10-20-1-168:~$ kubectl get svc argocd-server -n argocd
+NAME            TYPE           CLUSTER-IP      EXTERNAL-IP                                                               PORT(S)                      AGE
+argocd-server   LoadBalancer   172.20.131.20   a58fbb435a7964d3895948626f367d04-1884675910.us-east-1.elb.amazonaws.com   80:30367/TCP,443:32413/TCP   4h25m
+```bash
+
+Access the ArgoCD UI using 
+
+
+https://<EXTERNAL-IP>.amazonaws.com
+
+
+
 
 Watch the service:
 
@@ -429,12 +450,6 @@ Confirm:
 
 ```bash
 kubectl describe service argocd-server -n argocd
-```
-
-Access the UI:
-
-```text
-https://192.168.0.242
 ```
 
 
@@ -466,9 +481,6 @@ Do not store the password in Git, Jenkinsfiles, shell history, screenshots, or d
 
 Open argocd ui:
 
-```text
-https://192.168.0.242
-```
 
 Click:
 
@@ -482,8 +494,8 @@ Configure:
 Application Name: microservices-ecommerce
 Project Name: default
 Sync Policy: Automatic
-Repository URL: https://gitlab.openhelp.net/sreejith/microservices-e-commerce-eks-project.git
-Revision: main
+Repository URL: https://gitlab.openhelp.net/sreejith/microservices-e-commerce-eks.git
+Revision: HEAD
 Path: kubernetes-files
 Cluster URL: https://kubernetes.default.svc
 Namespace: dev
