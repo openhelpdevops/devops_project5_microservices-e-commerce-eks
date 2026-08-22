@@ -370,7 +370,7 @@ done
 
 ---
 
-# PART IV — Expose Argo CD through 
+# PART IV — Expose Argo CD through Load Balancer
 
 ```text
 root@kube:~#  kubectl get svc -n argocd
@@ -384,22 +384,26 @@ argocd-repo-server                        ClusterIP   10.102.246.57    <none>   
 argocd-server                             ClusterIP   10.103.115.96    <none>        80/TCP,443/TCP               4m25s
 argocd-server-metrics                     ClusterIP   10.102.29.187    <none>        8083/TCP                     4m25s
 ```
+
 Because Kubernetes deploys services to arbitrary network addresses inside your cluster, you’ll need to forward the relevant ports in order to access them from your local machine. 
 Argo CD sets up a service named argocd-server on port 443 internally. Because port 443 is the default HTTPS port, and you may be running some other HTTP/HTTPS services,
 it’s common practice to forward those to arbitrarily chosen other ports, like 8080, like so:
 
 Create dev name space
+```bash
 root@kube:~#  kubectl create ns dev
-
+```
 
 ## 18. Change `argocd-server` to `LoadBalancer`
 
 The default service is `ClusterIP`.
 
 Edit the ArgoCD Server Service
+
 ```bash
 kubectl edit svc argocd-server -n argocd
 ```
+
 Change the Service Type
 
 Find this line:
@@ -412,18 +416,20 @@ type: LoadBalancer
 
 Save and exit (:wq for vi).
 
+
 Get the External Load Balancer DNS
 
 ```bash
 kubectl get svc argocd-server -n argocd
-```bash
+```
 
 Sample output:
+
 ```bash
 ubuntu@ip-10-20-1-168:~$ kubectl get svc argocd-server -n argocd
 NAME            TYPE           CLUSTER-IP      EXTERNAL-IP                                                               PORT(S)                      AGE
 argocd-server   LoadBalancer   172.20.131.20   a58fbb435a7964d3895948626f367d04-1884675910.us-east-1.elb.amazonaws.com   80:30367/TCP,443:32413/TCP   4h25m
-```bash
+```
 
 Access the ArgoCD UI using 
 
