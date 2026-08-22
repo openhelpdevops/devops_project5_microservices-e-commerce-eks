@@ -517,6 +517,20 @@ Create Namespace: Enabled
 
 Click **Create**.
 
+<img width="2211" height="1326" alt="image" src="https://github.com/user-attachments/assets/b7b3a706-0df5-4018-ba5c-6c204f8a6738" />
+
+Get the frontend url
+
+```text
+ubuntu@ip-10-20-1-168:~$ kubectl get service frontend-external -n dev
+NAME                TYPE           CLUSTER-IP       EXTERNAL-IP                                                                PORT(S)        AGE
+frontend-external   LoadBalancer   172.20.240.130   k8s-dev-frontend-7f6a8c5a49-6f8bc94c2fa962d9.elb.us-east-1.amazonaws.com   80:30758/TCP   3h35m
+```
+Access ui:-
+
+<img width="3280" height="1363" alt="image" src="https://github.com/user-attachments/assets/ba63689e-b53b-445b-beb8-4d5905a41bb3" />
+
+
 
 ## EKS design
 
