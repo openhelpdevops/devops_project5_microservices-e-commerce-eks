@@ -1,10 +1,18 @@
 ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
+  namespace: dev
   labels:
     app: frontend
+
 spec:
   replicas: 2
   revisionHistoryLimit: 10
@@ -148,8 +156,10 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: frontend
+  namespace: dev
   labels:
     app: frontend
+
 spec:
   minAvailable: 1
   selector:
@@ -157,16 +167,21 @@ spec:
       app: frontend
 
 ---
+# Internal Service used by the ALB Ingress.
 apiVersion: v1
 kind: Service
 metadata:
   name: frontend
+  namespace: dev
   labels:
     app: frontend
+
 spec:
   type: ClusterIP
+
   selector:
     app: frontend
+
   ports:
     - name: http
       protocol: TCP
@@ -174,46 +189,51 @@ spec:
       targetPort: http
 
 ---
-apiVersion: v1
-kind: Service
+# AWS Load Balancer Controller creates an ALB for this Ingress.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
 metadata:
-  name: frontend-external
+  name: frontend-alb
+  namespace: dev
   labels:
     app: frontend
+
   annotations:
-    # Create a public Network Load Balancer.
-    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    # Create a public Application Load Balancer.
+    alb.ingress.kubernetes.io/scheme: internet-facing
 
-    # Explicitly use AWS Load Balancer Controller.
-    service.beta.kubernetes.io/aws-load-balancer-type: external
+    # Register frontend Pod IP addresses directly.
+    alb.ingress.kubernetes.io/target-type: ip
 
-    # Register Pod IP addresses directly in the target group.
-    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    # ALB communicates with the frontend using HTTP.
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
 
-    # NLB health-check configuration.
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: HTTP
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: traffic-port
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: /_healthz
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-success-codes: "200"
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-healthy-threshold: "3"
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-unhealthy-threshold: "3"
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "10"
+    # Create an HTTP listener on port 80.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
 
-    # Enable cross-zone load balancing.
-    service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
+    # ALB health-check configuration.
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+    alb.ingress.kubernetes.io/healthcheck-path: /_healthz
+    alb.ingress.kubernetes.io/success-codes: "200"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
 
-    # Tags added to the AWS resources.
-    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: Project=openhelp,Environment=prod,ManagedBy=ArgoCD
+    # Tags added to AWS resources.
+    alb.ingress.kubernetes.io/tags: Project=openhelp,Environment=prod,ManagedBy=ArgoCD
 
 spec:
-  type: LoadBalancer
-  loadBalancerClass: service.k8s.aws/nlb
+  ingressClassName: alb
 
-  selector:
-    app: frontend
-
-  ports:
-    - name: http
-      protocol: TCP
-      port: 80
-      targetPort: http
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
