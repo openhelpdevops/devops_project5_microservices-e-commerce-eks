@@ -32,7 +32,7 @@ pipeline {
         // GitHub Repository
         // ============================================================
 
-        GIT_REPO_NAME = 'devops_project5_microservices-e-commerce-eks-project'
+        GIT_REPO_NAME = 'devops_project5_microservices-e-commerce-eks'
         GIT_USER_NAME = 'openhelpdevops'
         GIT_EMAIL     = 'sreejithedl@gmail.com'
 
@@ -81,7 +81,7 @@ pipeline {
 
                 git branch: 'main',
                     credentialsId: 'my-git-pattoken',
-                    url: 'https://github.com/openhelpdevops/devops_project5_microservices-e-commerce-eks-project.git'
+                    url: 'https://github.com/openhelpdevops/devops_project5_microservices-e-commerce-eks.git'
 
             }
 
